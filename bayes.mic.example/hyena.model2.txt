@@ -1,0 +1,56 @@
+# N is number of observation
+# Lmic[i] is the log of MIC value of ith obsevation
+# dnorm means it is a normal distributed variable
+# Lmu[i] is the mean of Lmic[i]
+# tauLmic is 1/variance(Lmic)
+# lower[i] and upper[i] are lower and upper bound for Lmic[i]
+# alpha0 is intercept term
+# alpha.type is the coefficient of type effect
+
+
+model {
+
+	for (i in 1:N)
+		{
+		Lmic[i] ~ dnorm(Lmu[i],tauLmic)I(lower[i], upper[i])
+		Lmu[i] <- alpha0 + alpha.type[type[i]] +alpha.visit*visit[i]
+                resid[i] <- Lmic[i] - Lmu[i]
+		}
+
+# Prior Distributions for alpha0
+
+		alpha0 ~ dnorm(0, 0.1)
+
+
+# Prior Distributions for alpha.type
+
+		alpha.type[1]<-0
+		alpha.type[2]~ dnorm(0, 0.1)
+
+
+# Prior Distributions for alpha.visit
+
+		alpha.visit~dnorm(0, 0.1)
+
+
+# Prior Distributions for tauLmic
+
+		tauLmic ~ dgamma(0.1, 0.01)
+		sigmaLmic <- 1 / sqrt(tauLmic)
+
+#Prediction: type 0 is the vegetarian diet, type 1 is the commercial diet
+
+	       pred.type2.visit1<- alpha0 + alpha.type[2] + alpha.visit
+               pred.type2.visit2<- alpha0 + alpha.type[2] + alpha.visit*2
+	       pred.type2.visit3<- alpha0 + alpha.type[2] + alpha.visit*3
+               pred.type2.visit4<- alpha0 + alpha.type[2] + alpha.visit*4
+	       pred.type2.visit5<- alpha0 + alpha.type[2] + alpha.visit*5
+               pred.type1.visit1<- alpha0 + alpha.type[1] + alpha.visit
+	       pred.type1.visit2<- alpha0 + alpha.type[1] + alpha.visit*2
+               pred.type1.visit3<- alpha0 + alpha.type[1] + alpha.visit*3
+	       pred.type1.visit4<- alpha0 + alpha.type[1] + alpha.visit*4
+               pred.type1.visit5<- alpha0 + alpha.type[1] + alpha.visit*5
+	}
+	
+	
+	

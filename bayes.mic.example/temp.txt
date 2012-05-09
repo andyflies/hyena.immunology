@@ -1,0 +1,27 @@
+{
+  pred.visit1 <- alpha0 + alpha.visit1 * 1
+  pred.visit2 <- alpha0 + alpha.visit2 * 2
+  pred.visit3 <- alpha0 + alpha.visit3 * 3
+  pred.visit4 <- alpha0 + alpha.visit4 * 4
+  pred.visit5 <- alpha0 + alpha.visit5 * 5
+  pred.visit6 <- alpha0 + alpha.visit6 * 6
+  pred.visit7 <- alpha0 + alpha.visit7 * 7
+  pred.visit8 <- alpha0 + alpha.visit8 * 8
+  pred.visit9 <- alpha0 + alpha.visit9 * 9
+  pred.visit10 <- alpha0 + alpha.visit10 * 10
+  pred.visit11 <- alpha0 + alpha.visit11 * 11
+  pred.visit12 <- alpha0 + alpha.visit12 * 12
+  pred.visit13 <- alpha0 + alpha.visit13 * 13
+  pred.visit14 <- alpha0 + alpha.visit14 * 14
+  pred.visit15 <- alpha0 + alpha.visit15 * 15
+  pred.visit16 <- alpha0 + alpha.visit16 * 16
+  pred.visit17 <- alpha0 + alpha.visit17 * 17
+  pred.visit18 <- alpha0 + alpha.visit18 * 18
+  pred.visit19 <- alpha0 + alpha.visit19 * 19
+  pred.visit20 <- alpha0 + alpha.visit20 * 20
+  pred.visit21 <- alpha0 + alpha.visit21 * 21
+  pred.visit22 <- alpha0 + alpha.visit22 * 22
+  pred.visit23 <- alpha0 + alpha.visit23 * 23
+  pred.visit24 <- alpha0 + alpha.visit24 * 24
+  pred.visit25 <- alpha0 + alpha.visit25 * 25
+}

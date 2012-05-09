@@ -1,0 +1,22 @@
+model
+{
+    for (i in 1:N) {
+        Lmic[i] ~ dnorm(Lmu[i], tauLmic)  I(lower[i], upper[i])
+        Lmu[i] <- alpha0 + alpha.visit * visit[i]
+        resid[i] <- Lmic[i] - Lmu[i]
+    }
+    alpha0 ~ dnorm(0.00000E+00, 0.1)
+    alpha.visit ~ dnorm(0.00000E+00, 0.1)
+    tauLmic ~ dgamma(0.1, 0.01)
+    sigmaLmic <- 1/sqrt(tauLmic)
+    pred.type0.visit1 <- alpha0 + alpha.visit
+    pred.type0.visit2 <- alpha0 + alpha.visit * 2
+    pred.type0.visit3 <- alpha0 + alpha.visit * 3
+    pred.type0.visit4 <- alpha0 + alpha.visit * 4
+    pred.type0.visit5 <- alpha0 + alpha.visit * 5
+    pred.type1.visit1 <- alpha0 + alpha.visit
+    pred.type1.visit2 <- alpha0 + alpha.visit * 2
+    pred.type1.visit3 <- alpha0 + alpha.visit * 3
+    pred.type1.visit4 <- alpha0 + alpha.visit * 4
+    pred.type1.visit5 <- alpha0 + alpha.visit * 5
+}

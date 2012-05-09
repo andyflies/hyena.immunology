@@ -1,0 +1,53 @@
+# N is number of observation
+# Lmic[i] is the log of MIC value of ith obsevation
+# dnorm means it is a normal distributed variable
+# Lmu[i] is the mean of Lmic[i]
+# tauLmic is 1/variance(Lmic)
+# lower[i] and upper[i] are lower and upper bound for Lmic[i]
+# alpha0 is intercept term
+# alpha.visit is the coefficient of visit effect
+
+
+model {
+
+	for (i in 1:N)
+		{
+		Lmic[i] ~ dnorm(Lmu[i],tauLmic)I(lower[i], upper[i])
+		Lmu[i] <- alpha0 + alpha.visit[visit[i]]             # This is treated as categorical variable, see model 7 for continuous treatment
+                resid[i] <- Lmic[i] - Lmu[i]
+		}
+
+# Prior Distributions for alpha0
+
+		alpha0 ~ dnorm(0, 0.1)
+
+# Prior Distributions for alpha.visit
+# Need to change the number of loops based on the number of categories. See model 7 for non-categorical
+
+    for (k in 1:4)
+    {
+      alpha.visit[k] ~ dnorm(0, 0.1)
+    }
+    alpha.visit[5]<-0
+
+# Prior Distributions for tauLmic
+
+		tauLmic ~ dgamma(0.1, 0.01)
+		sigmaLmic <- 1 / sqrt(tauLmic)
+
+#type 0 is the vegetarian diet, type 1 is the commercial diet
+
+	       pred.type2.visit1<- alpha0 +  alpha.visit[1]
+         pred.type2.visit2<- alpha0 +  alpha.visit[2]
+	       pred.type2.visit3<- alpha0 +  alpha.visit[3]
+         pred.type2.visit4<- alpha0 +  alpha.visit[4]
+         pred.type2.visit5<- alpha0
+         pred.type1.visit1<- alpha0 +  alpha.visit[1]
+	       pred.type1.visit2<- alpha0 +  alpha.visit[2]
+         pred.type1.visit3<- alpha0 +  alpha.visit[3]
+	       pred.type1.visit4<- alpha0 +  alpha.visit[4]
+         pred.type1.visit5<- alpha0
+	}
+	
+	
+	

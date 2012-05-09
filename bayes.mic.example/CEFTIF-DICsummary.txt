@@ -1,0 +1,4 @@
+                                        model     DIC     pD  Max.BGR Delta.dic
+1 M1: [Y]=Visit(C) Type(C) Visit*Type         1628.45 10.633 1.038328      0.00
+2 M7: [Y]=Visit                               1643.24  2.853 1.016947     14.79
+3 M7: [Y]=Visit                               1643.24  2.853 1.016947     14.79

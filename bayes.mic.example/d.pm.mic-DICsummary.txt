@@ -1,0 +1,4 @@
+                                          model     DIC     pD  Max.BGR Delta.dic
+1 HM1F: [Y]=Visit(C) Type(C) Visit*Type Farm(R) 1605.06 10.241 3.329487      0.00
+2  HM9: [Y]=Visit                               1644.82  2.911 4.007804     39.76
+3  HM7: [Y]=Visit                               1644.82  2.911 4.007804     39.76

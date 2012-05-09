@@ -1,0 +1,882 @@
+# AVIAN.R
+# Analysis of AVIAN data set
+#
+# Author: hwu1
+###############################################################################
+
+#Call specifical library for running WinBUGS in R
+library(lattice)
+library(coda)
+library("R2WinBUGS")
+
+
+
+# read original data set
+data.file <- 'AVIAN.xls';
+
+#WinBUGS can not handle missing data, so I use a large number to represent infinity and a small number to represent zero.
+SMALL.NUMBER <- 0.0001;
+LARGE.NUMBER <- 10000;
+
+#We input number of farm here. In AVIAN data set, there are 11 farms. Farms are nameed as 1-10, and 30.
+#In order to match the index, I change farm=30 to farm=11.
+Nfarm<-11;
+
+#input the anti-microbial name, number of concentrations, and concentrations
+avian.plate.values <- list(
+                           AMOXIC = list(
+                             antimicrobial = "Amoxycillin",
+                             ncells = 7,
+                             conc = c(16, 8, 4, 2, 1, .5, .25)
+                             ),
+                           CEFTIF = list(
+                             antimicrobial = "Ceftiofur",
+                             ncells = 5,
+                             conc = c(4, 2, 1, .5, .25)
+                             ),
+                           CLINDA = list(
+                             antimicrobial = "Clindamycin",
+                             ncells = 5,
+                             conc = c(4, 2, 1, .5, .25)
+                             ),
+                           ENROFL = list(
+                             antimicrobial = "Enrofloxacin",
+                             ncells = 5,
+                             conc = c(2, 1, .5, .25, .125)
+                             ),
+                           ERYTH = list(
+                             antimicrobial = "Erythromycin",
+                             ncells = 6,
+                             conc = c(4, 2, 1, .5, .25, .125)
+                             ),
+                           GENTAM = list(
+                             antimicrobial = "Gentamycin",
+                             ncells = 5,
+                             conc = c(8, 4, 2, 1, .5)
+                             ),
+                           NEOMYC = list(
+                             antimicrobial = "Neomycin",
+                             ncells = 5,
+                             conc = c(32, 16, 8, 4, 2)
+                             ),
+                           NOVOBI = list(
+                             antimicrobial = "Novobiocin",
+                             ncells = 4,
+                             conc = c(4, 2, 1, .5)
+                             ),
+                           OXYTET = list(
+                             antimicrobial = "Oxytetracycline",
+                             ncells = 6,
+                             conc = c(8, 4, 2, 1, .5, .25)
+                             ),
+                           PENICI = list(
+                             antimicrobial = "Penicillin",
+                             ncells = 8,
+                             conc = c(8, 4, 2, 1, .5, .25, .125, .0625)
+                             ),
+                           SARAFL = list(
+                             antimicrobial = "Sarafloxacin",
+                             ncells = 4,
+                             conc = c(.25, .125, .0625, .03125)
+                             ),
+                           SPECT = list(
+                             antimicrobial = "Spectinomycin",
+                             ncells = 4,
+                             conc = c(64, 32, 16, 8)
+                             ),
+                           STREPT = list(
+                             antimicrobial = "Streptomycin",
+                             ncells = 8,
+                             conc = c(1024, 512, 256, 128, 64, 32, 16, 8)
+                             ),
+                           SDIMET = list(
+                             antimicrobial = "Sulfadimethoxine",
+                             ncells = 4,
+                             conc = c(256, 128, 64, 32)
+                             ),
+                           SULTHI = list(
+                             antimicrobial = "Sulfathiazole",
+                             ncells = 4,
+                             conc = c(256, 128, 64, 32)
+                             ),
+                           TETRA = list(
+                             antimicrobial = "Tetracycline",
+                             ncells = 6,
+                             conc = c(8, 4, 2, 1, .5, .25)
+                             ),
+                           TRISUL = list(
+                             antimicrobial = "Trimethoprim",
+                             ncells = 3,
+                             conc = c(2, 1, .5)
+                             ),
+                           TYLO = list(
+                             antimicrobial = "TylosinTartrate",
+                             ncells = 4,
+                             conc = c(20, 10, 5, 2.5)
+                             )
+                           );
+
+
+#Special fixups for odd values. Similar operation as SAS.
+fix.exceptions <- function (char.vector) {
+  fixed.vector <- sub('\\.12$', '.125', char.vector);
+  fixed.vector <- sub('\\.06$', '.0625', fixed.vector);
+  fixed.vector <- sub('\\.03$', '.03125', fixed.vector);
+  fixed.vector;
+}
+
+#Function of finding whether input MIC is valid
+contains.a.good.value <- function (upper.value, antimic.code) {
+  valid.values = avian.plate.values[[antimic.code]]$conc;
+  valid.values = c(valid.values, LARGE.NUMBER) ;
+  as.logical(sum(valid.values == upper.value));
+}
+
+#Function of generating lower bound 
+get.lower.vector <- function (char.vector) {
+	response.l <- as.numeric(char.vector)/2; #divide every by 2 anyway; NAs will be introduced for values with "<=" and ">"
+	response.l[grep('<=', char.vector)] <- SMALL.NUMBER; #replace with a very small number
+	response.l[grep('>', char.vector)] <- as.numeric( sub('>([\\.\\d]+)', '\\1', char.vector[grep('>', char.vector)], perl=TRUE) ); #remove leading '>'
+	response.l;	
+}
+#Function of generating upper bound
+get.upper.vector <- function (char.vector) {
+	response.u <- as.numeric(char.vector); #initialize the vector; NAs will be introduced for values with "<=" and ">"
+	response.u[grep('>', char.vector)] <- LARGE.NUMBER; #replace with a very large number
+	response.u[grep('<=', char.vector)] <- as.numeric( sub('<=([\\.\\d]+)', '\\1', char.vector[grep('<=', char.vector)], perl=TRUE) ); #remove leading "<="
+	response.u;	
+}
+
+
+#Function of transform type
+transform.type <- function (char.vector) {
+	type <- as.numeric(char.vector);
+	type[type == 0] <- 2; # When type == 0, replace the value with 2
+	type;
+}
+
+
+#Function of transform farm
+transform.farm <- function (char.vector) {
+	farm <- as.numeric(char.vector);
+	farm[farm == 30] <- 11; # When farm == 30, replace the value with 11
+	farm;
+}
+
+#  Generate the deviance values from simulated data with farm effect
+#  Input arguments
+#      results - individual iterations of the MCMC
+#                with predictions for each type visit combination
+#      type    - vector for each sample of the type of farm (1 or 2) for each sample
+#      visit   - vector for each sample of the visit number
+#      farm    - vector for each sample of which farm was visited
+#      conc    - valid concentration limits for MIC
+# start the iteration over each value of the MCMC chain
+# Note that type=2 corresponds to type0 in the raw data
+
+generate.sim.farm.deviance<- function(results, type, visit, farm, conc){
+parms<-c( "pred.type1.visit1","pred.type1.visit2","pred.type1.visit3",
+          "pred.type1.visit4","pred.type1.visit5","pred.type0.visit1",
+          "pred.type0.visit2","pred.type0.visit3","pred.type0.visit4",
+          "pred.type0.visit5")
+my.deviance <- NULL
+
+for (i in 1:dim(results)[1]){
+   mean.logMIC <- results[i,parms]
+   mean.logMIC <- matrix(mean.logMIC, nrow=2, ncol=5, byrow=TRUE) # create a matrix of means
+   mean.data <- mean.logMIC[as.matrix(cbind(type, visit))]
+   # generate the random farm effects
+   farm.effects <- rnorm(max(farm))*results[i,"sigmafarm"]
+   mean.data <- mean.data + farm.effects[farm]   # note we condition on random effects
+   # generate the random noise
+   sigmaLmic <- results[i,"sigmaLmic"]
+   sim.data <- mean.data + rnorm(length(mean.data))*sigmaLmic
+
+   # now to censor the observed data
+   log.conc <- log(conc)  # the concentration.
+   MIC <- outer(sim.data, log.conc, FUN="<")
+   MIC.index <- apply(MIC, 1, sum)
+   MIC.index <- pmax(1,MIC.index)  # besure that everything is below maximum
+   MIC.index <- pmin(length(log.conc)-1,MIC.index) # everything is above smallest
+   
+   # compute the probability of seeing a value in this interval
+   prob1<- pnorm( log.conc[MIC.index], mean=mean.data, sd=sigmaLmic, lower.tail=TRUE)
+   prob2<- pnorm( log.conc[MIC.index+1], mean=mean.data, sd=sigmaLmic, lower.tail=TRUE)
+   prob <- prob1 - prob2
+   deviance <- -2*sum(log(prob+.00001)) # add a small constant to avoid 0
+   if( is.na(deviance)) {browser()}
+   my.deviance <- c(my.deviance, deviance) # make a long list of deviances
+   #browser()
+} # end of for loop
+my.deviance  # return the final deviances
+} # end of function generate-p-value
+
+
+#  Generate the deviance values from simulated data without farm effect
+#  Input arguments
+#      results - individual iterations of the MCMC
+#                with predictions for each type visit combination
+#      type    - vector for each sample of the type of farm (1 or 2) for each sample
+#      visit   - vector for each sample of the visit number
+#      conc    - valid concentration limits for MIC
+# start the iteration over each value of the MCMC chain
+# Note that type=2 corresponds to type0 in the raw data
+
+generate.sim.deviance<- function(results, type, visit, conc){
+parms<-c( "pred.type1.visit1","pred.type1.visit2","pred.type1.visit3",
+          "pred.type1.visit4","pred.type1.visit5","pred.type0.visit1",
+          "pred.type0.visit2","pred.type0.visit3","pred.type0.visit4",
+          "pred.type0.visit5")
+my.deviance <- NULL
+
+for (i in 1:dim(results)[1]){
+   mean.logMIC <- results[i,parms]
+   mean.logMIC <- matrix(mean.logMIC, nrow=2, ncol=5, byrow=TRUE) # create a matrix of means
+   mean.data <- mean.logMIC[as.matrix(cbind(type, visit))]
+   # generate the random noise
+   sigmaLmic <- results[i,"sigmaLmic"]
+   sim.data <- mean.data + rnorm(length(mean.data))*sigmaLmic
+
+   # now to censor the observed data
+   log.conc <- log(conc)  # the concentration.
+   MIC <- outer(sim.data, log.conc, FUN="<")
+   MIC.index <- apply(MIC, 1, sum)
+   MIC.index <- pmax(1,MIC.index)  # besure that everything is below maximum
+   MIC.index <- pmin(length(log.conc)-1,MIC.index) # everything is above smallest
+   
+   # compute the probability of seeing a value in this interval
+   prob1<- pnorm( log.conc[MIC.index], mean=mean.data, sd=sigmaLmic, lower.tail=TRUE)
+   prob2<- pnorm( log.conc[MIC.index+1], mean=mean.data, sd=sigmaLmic, lower.tail=TRUE)
+   prob <- prob1 - prob2
+   deviance <- -2*sum(log(prob+.00001)) # add a small constant to avoid 0
+   if( is.na(deviance)) {browser()}
+   my.deviance <- c(my.deviance, deviance) # make a long list of deviances
+   #browser()
+} # end of for loop
+my.deviance  # return the final deviances
+} # end of function generate-p-value
+
+
+
+
+
+#Input anti-microbial code and model
+#response<-c("AMOXIC","CEFTIF","CLINDA","ENROFL","ERYTH","GENTAM","NEOMYC","NOVOBI","OXYTET","PENICI","SARAFL","SPECT","STREPT","SDIMET","SULTHI","TETRA","TRISUL","TYLO");
+response<-c("SPECT","STREPT","SDIMET","SULTHI","TETRA","TRISUL","TYLO");
+#response<-c("AMOXIC","CEFTIF","CLINDA","ENROFL","ERYTH","GENTAM","NEOMYC");
+valid.model = c( "M1", "MF1","M2","MF2", "M3","MF3", "M4", "MF4", "M5", "MF5","M6", "MF6", "M7","MF7");
+
+
+
+#Read the input data
+library(xlsReadWrite);
+data <- read.xls( file=data.file, 
+                  colNames = TRUE, 
+                  sheet = 1, 
+                  type = "data.frame",
+                  from = 1, 
+                  rowNames = TRUE, 
+                  colClasses = "character",          
+                  checkNames = TRUE, 
+                  dateTimeAs = "numeric", 
+                  stringsAsFactors = default.stringsAsFactors() );
+
+
+
+#Set two for loops to analysis all response variables and all models
+for (i in response)  # First for loop start here.
+{  response.variable=i;
+my.out<-list();
+out<-list();
+
+
+number.of.variables <- dim(data)[2];
+tmp <- 1:number.of.variables;
+response.column <- tmp[ names(data) == response.variable ];
+response <- data[ response.column ];
+
+#Remove rows with missing data or bad values
+data <- data[response != '.',];
+response <- data[response.column];
+response <- fix.exceptions(response[,1]);
+response.l <- get.lower.vector(response);
+response.u <- get.upper.vector(response);
+
+#Get visit,type,farm,lower,upper
+visit <- as.numeric(data$Visit);
+lower<-log(response.l);
+upper<-log(response.u);
+valid.rows <- sapply(response.u, contains.a.good.value,  antimic.code=response.variable);
+visit<-visit[valid.rows];
+type<-data$Type[valid.rows];
+farm<-as.numeric(data$Farm[valid.rows]);
+lower<-lower[valid.rows];
+upper<-upper[valid.rows];
+sample.size <- length(visit);
+type<-transform.type(type);
+farm<-transform.farm(farm);
+
+
+
+#input possible models, M1-M7 represent same models as described in SAS. 
+#   Model  M1: [Y]=Visit(C) Type(C) Visit*Type
+#          M2: [Y]=Visit Type(C)
+#          M3: [Y]=Visit(C) Type(C)
+#          M4: [Y]=Visit Type(C) Visit*Type
+#          M5: [Y]=Type(C)
+#          M6: [Y]=Visit(C)
+#          M7: [Y]=Visit
+#   Model MF1: [Y]=Visit(C) Type(C) Visit*Type Farm(R)
+#         MF2: [Y]=Visit Type(C) Farm(R)
+#         MF3: [Y]=Visit(C) Type(C) Farm(R)
+#         MF4: [Y]=Visit Type(C) Visit*Type Farm(R)
+#         MF5: [Y]=Type(C) Farm(R)
+#         MF6: [Y]=Visit(C) Farm(R)
+#         MF7: [Y]=Visit Farm(R)
+#model.file: name of model file.
+#model.name: model notation
+#model.farm: whether model contain farm effect
+#     inits: a list of two sets of initial values
+#parameters: the name list of parameters to be monitored
+#bugs.input: the input data for WinBUGS analysis. Different model has different input data.
+
+models <- list (
+      M1 = list(model.file ="model1.txt",  
+                model.name="M1: [Y]=Visit(C) Type(C) Visit*Type        ",
+                model.farm=0,                
+                inits = list(
+                            list(
+                            alpha0 = 0,
+                            alpha.type = c(NA,0),
+                            alpha.visit = c(0,0,0,0,NA),
+                            alpha.type.visit=c(NA,NA,NA,NA,NA,0,0,0,0,NA),
+                            tauLmic = 1,
+                            Lmic = c(lower+0.1)
+                                 ),
+
+                            list(
+                            alpha0 = 0,
+                            alpha.type = c(NA,0),
+                            alpha.visit =c(0,0,0,0,NA),
+				    alpha.type.visit=c(NA,NA,NA,NA,NA,0,0,0,0,NA),
+                            tauLmic = 1,
+                            Lmic = c(upper-0.1))
+                            ),
+
+                  parameters = c("alpha0", "alpha.type", "alpha.visit","alpha.type.visit","resid","sigmaLmic",
+                                 "pred.type0.visit1","pred.type0.visit2","pred.type0.visit3","pred.type0.visit4","pred.type0.visit5",
+                                 "pred.type1.visit1","pred.type1.visit2","pred.type1.visit3","pred.type1.visit4","pred.type1.visit5","diff"),
+                  bugs.input = list(N=sample.size, lower=lower, upper=upper, type=type,  visit=visit)
+                  ),
+
+      MF1 = list(model.file ="modelf1.txt",
+                model.name="MF1: [Y]=Visit(C) Type(C) Visit*Type Farm(R)",                
+                model.farm=1, 
+                inits = list(
+                            list(
+                            alpha0 = 0,
+                            alpha.type = c(NA,0),
+                            alpha.visit = c(0,0,0,0,NA),
+                            alpha.type.visit=c(NA,NA,NA,NA,NA,0,0,0,0,NA),
+                            alpha.farm = c(rep(0,Nfarm)),taufarm = 1,
+                            tauLmic = 1,
+                            Lmic = c(lower+0.1)
+                                 ),
+
+                            list(
+                            alpha0 = 0,
+                            alpha.type = c(NA,0),
+                            alpha.visit =c(0,0,0,0,NA),
+                            alpha.type.visit=c(NA,NA,NA,NA,NA,0,0,0,0,NA),
+                            alpha.farm = c(rep(0,Nfarm)),taufarm = 1,
+                            tauLmic = 1,
+                            Lmic = c(upper-0.1))
+                            ),
+
+                  parameters = c("alpha0", "alpha.type", "alpha.visit","alpha.type.visit","resid","sigmaLmic","sigmafarm",
+                                 "pred.type0.visit1","pred.type0.visit2","pred.type0.visit3","pred.type0.visit4","pred.type0.visit5",
+                                 "pred.type1.visit1","pred.type1.visit2","pred.type1.visit3","pred.type1.visit4","pred.type1.visit5","diff"),
+                  bugs.input = list(N=sample.size, lower=lower, upper=upper, type=type,  visit=visit,farm=farm)
+                  ),
+
+
+      M2 = list(model.file = "model2.txt",
+                model.name="M2: [Y]=Visit Type(C)                      ",  
+                model.farm=0,                 
+                inits = list(
+                            list(
+                            alpha0 = 0,
+                            alpha.type = c(NA,0),
+                            alpha.visit = 0,
+                            tauLmic = 1,
+                            Lmic = c(lower+0.1)
+                                 ),
+
+                            list(
+                            alpha0 = 0,
+                            alpha.type = c(NA,0),
+                            alpha.visit =0,
+                            tauLmic = 1,
+                            Lmic = c(upper-0.1))
+                            ),
+
+                  parameters = c("alpha0", "alpha.type", "alpha.visit","resid","sigmaLmic",
+                                 "pred.type0.visit1","pred.type0.visit2","pred.type0.visit3","pred.type0.visit4","pred.type0.visit5",
+                                 "pred.type1.visit1","pred.type1.visit2","pred.type1.visit3","pred.type1.visit4","pred.type1.visit5"),
+                  bugs.input = list(N=sample.size, lower=lower, upper=upper, type=type,  visit=visit)
+                  ),
+
+      MF2 = list(model.file = "modelf2.txt",    
+                model.name="MF2: [Y]=Visit Type(C) Farm(R)              ",               
+                model.farm=1,
+                inits = list(
+                            list(
+                            alpha0 = 0,
+                            alpha.type = c(NA,0),
+                            alpha.visit = 0,
+                            alpha.farm = c(rep(0,Nfarm)),taufarm = 1,
+                            tauLmic = 1,
+                            Lmic = c(lower+0.1)
+                                 ),
+
+                            list(
+                            alpha0 = 0,
+                            alpha.type = c(NA,0),
+                            alpha.visit =0,
+                            alpha.farm = c(rep(0,Nfarm)),taufarm = 1,
+                            tauLmic = 1,
+                            Lmic = c(upper-0.1))
+                            ),
+
+                  parameters = c("alpha0", "alpha.type", "alpha.visit","resid","sigmaLmic","sigmafarm",
+                                 "pred.type0.visit1","pred.type0.visit2","pred.type0.visit3","pred.type0.visit4","pred.type0.visit5",
+                                 "pred.type1.visit1","pred.type1.visit2","pred.type1.visit3","pred.type1.visit4","pred.type1.visit5"),
+                  bugs.input = list(N=sample.size, lower=lower, upper=upper, type=type, visit=visit, farm=farm)
+                  ),
+
+
+      M3 = list(model.file = "model3.txt",     
+                model.name="M3: [Y]=Visit(C) Type(C)                   ",              
+                model.farm=0,
+                inits = list(
+                            list(
+                            alpha0 = 0,
+                            alpha.type = c(NA,0),
+                            alpha.visit = c(0,0,0,0,NA),
+                            tauLmic = 1,
+                            Lmic = c(lower+0.1)
+                                 ),
+
+                            list(
+                            alpha0 = 0,
+                            alpha.type = c(NA,0),
+                            alpha.visit =c(0,0,0,0,NA),
+                            tauLmic = 1,
+                            Lmic = c(upper-0.1))
+                            ),
+
+                  parameters = c("alpha0", "alpha.type", "alpha.visit","resid","sigmaLmic",
+                                 "pred.type0.visit1","pred.type0.visit2","pred.type0.visit3","pred.type0.visit4","pred.type0.visit5",
+                                 "pred.type1.visit1","pred.type1.visit2","pred.type1.visit3","pred.type1.visit4","pred.type1.visit5"),
+                  bugs.input = list(N=sample.size, lower=lower, upper=upper, type=type,  visit=visit)
+                  ),
+
+      MF3 = list(model.file = "modelf3.txt",      
+                model.name="MF3: [Y]=Visit(C) Type(C) Farm(R)           ",             
+                model.farm=1,
+                inits = list(
+                            list(
+                            alpha0 = 0,
+                            alpha.type = c(NA,0),
+                            alpha.visit = c(0,0,0,0,NA),
+                            alpha.farm = c(rep(0,Nfarm)),taufarm = 1,
+                            tauLmic = 1,
+                            Lmic = c(lower+0.1)
+                                 ),
+
+                            list(
+                            alpha0 = 0,
+                            alpha.type = c(NA,0),
+                            alpha.visit =c(0,0,0,0,NA),
+                            alpha.farm = c(rep(0,Nfarm)),taufarm = 1,
+                            tauLmic = 1,
+                            Lmic = c(upper-0.1))
+                            ),
+
+                  parameters = c("alpha0", "alpha.type", "alpha.visit","resid","sigmaLmic","sigmafarm",
+                                 "pred.type0.visit1","pred.type0.visit2","pred.type0.visit3","pred.type0.visit4","pred.type0.visit5",
+                                 "pred.type1.visit1","pred.type1.visit2","pred.type1.visit3","pred.type1.visit4","pred.type1.visit5"),
+                  bugs.input = list(N=sample.size, lower=lower, upper=upper, type=type,  visit=visit,farm=farm)
+                  ),
+
+
+      M4 = list(model.file = "model4.txt",        
+                model.name="M4: [Y]=Visit Type(C) Visit*Type           ",           
+                model.farm=0,
+                inits = list(
+                            list(
+                            alpha0 = 0,
+                            alpha.type = c(NA,0),
+                            alpha.visit = 0,
+                            alpha.type.visit=c(NA,0),
+                            tauLmic = 1,
+                            Lmic = c(lower+0.1)
+                                 ),
+
+                            list(
+                            alpha0 = 0,
+                            alpha.type = c(NA,0),
+                            alpha.visit =0,
+                            alpha.type.visit=c(NA,0),
+                            tauLmic = 1,
+                            Lmic = c(upper-0.1))
+                            ),
+
+                  parameters = c("alpha0", "alpha.type", "alpha.visit","alpha.type.visit","resid","sigmaLmic",
+                                 "pred.type0.visit1","pred.type0.visit2","pred.type0.visit3","pred.type0.visit4","pred.type0.visit5",
+                                 "pred.type1.visit1","pred.type1.visit2","pred.type1.visit3","pred.type1.visit4","pred.type1.visit5"),
+                  bugs.input = list(N=sample.size, lower=lower, upper=upper, type=type,  visit=visit)
+                  ),
+
+      MF4 = list(model.file = "modelf4.txt",          
+                model.name="MF4: [Y]=Visit Type(C) Visit*Type Farm(R)   ",         
+                model.farm=1,
+                inits = list(
+                            list(
+                            alpha0 = 0,
+                            alpha.type = c(NA,0),
+                            alpha.visit = 0,
+                            alpha.type.visit=c(NA,0),
+                            alpha.farm = c(rep(0,Nfarm)),taufarm = 1,
+                            tauLmic = 1,
+                            Lmic = c(lower+0.1)
+                                 ),
+
+                            list(
+                            alpha0 = 0,
+                            alpha.type = c(NA,0),
+                            alpha.visit =0,
+                            alpha.type.visit=c(NA,0),
+                            alpha.farm = c(rep(0,Nfarm)),taufarm = 1,
+                            tauLmic = 1,
+                            Lmic = c(upper-0.1))
+                            ),
+
+                  parameters = c("alpha0", "alpha.type", "alpha.visit","alpha.type.visit","resid","sigmaLmic","sigmafarm",
+                                 "pred.type0.visit1","pred.type0.visit2","pred.type0.visit3","pred.type0.visit4","pred.type0.visit5",
+                                 "pred.type1.visit1","pred.type1.visit2","pred.type1.visit3","pred.type1.visit4","pred.type1.visit5"),
+                  bugs.input = list(N=sample.size, lower=lower, upper=upper, type=type,  visit=visit,farm=farm)
+                  ),
+
+
+      M5 = list(model.file = "model5.txt",          
+                model.name="M5: [Y]=Type(C)                            ",         
+                model.farm=0,
+                inits = list(
+                            list(
+                            alpha0 = 0,
+                            alpha.type = c(NA,0),
+                            tauLmic = 1,
+                            Lmic = c(lower+0.1)
+                                 ),
+
+                            list(
+                            alpha0 = 0,
+                            alpha.type = c(NA,0),
+                            tauLmic = 1,
+                            Lmic = c(upper-0.1))
+                            ),
+
+                  parameters = c("alpha0", "alpha.type","resid", "sigmaLmic",
+                                 "pred.type0.visit1","pred.type0.visit2","pred.type0.visit3","pred.type0.visit4","pred.type0.visit5",
+                                 "pred.type1.visit1","pred.type1.visit2","pred.type1.visit3","pred.type1.visit4","pred.type1.visit5"),
+                  bugs.input = list(N=sample.size, lower=lower, upper=upper, type=type)
+                  ),
+
+      MF5 = list(model.file = "modelf5.txt",          
+                model.name="MF5: [Y]=Type(C) Farm(R)                    ",         
+                model.farm=1,
+                inits = list(
+                            list(
+                            alpha0 = 0,
+                            alpha.type = c(NA,0),
+                            alpha.farm = c(rep(0,Nfarm)),taufarm = 1,
+                            tauLmic = 1,
+                            Lmic = c(lower+0.1)
+                                 ),
+
+                            list(
+                            alpha0 = 0,
+                            alpha.type = c(NA,0),
+                            alpha.farm = c(rep(0,Nfarm)),taufarm = 1,
+                            tauLmic = 1,
+                            Lmic = c(upper-0.1))
+                            ),
+
+                  parameters = c("alpha0", "alpha.type","resid", "sigmaLmic","sigmafarm",
+                                 "pred.type0.visit1","pred.type0.visit2","pred.type0.visit3","pred.type0.visit4","pred.type0.visit5",
+                                 "pred.type1.visit1","pred.type1.visit2","pred.type1.visit3","pred.type1.visit4","pred.type1.visit5"),
+                  bugs.input = list(N=sample.size, lower=lower, upper=upper, type=type,farm=farm)
+                  ),
+
+
+      M6 = list(model.file = "model6.txt",        
+                model.name="M6: [Y]=Visit(C)                           ",           
+                model.farm=0,
+                inits = list(
+                            list(
+                            alpha0 = 0,
+                            alpha.visit = c(0,0,0,0,NA),
+                            tauLmic = 1,
+                            Lmic = c(lower+0.1)
+                                 ),
+
+                            list(
+                            alpha0 = 0,
+                            alpha.visit =c(0,0,0,0,NA),
+                            tauLmic = 1,
+                            Lmic = c(upper-0.1))
+                            ),
+
+                  parameters = c("alpha0", "alpha.visit","resid","sigmaLmic",
+                                  "pred.type0.visit1","pred.type0.visit2","pred.type0.visit3","pred.type0.visit4","pred.type0.visit5",
+                                 "pred.type1.visit1","pred.type1.visit2","pred.type1.visit3","pred.type1.visit4","pred.type1.visit5"),
+                  bugs.input = list(N=sample.size, lower=lower, upper=upper, visit=visit)
+                  ),
+
+      MF6 = list(model.file = "modelf6.txt",         
+                model.name="MF6: [Y]=Visit(C) Farm(R)                   ",          
+                model.farm=1,
+                inits = list(
+                            list(
+                            alpha0 = 0,
+                            alpha.visit = c(0,0,0,0,NA),
+                            alpha.farm = c(rep(0,Nfarm)),taufarm = 1,
+                            tauLmic = 1,
+                            Lmic = c(lower+0.1)
+                                 ),
+
+                            list(
+                            alpha0 = 0,
+                            alpha.visit =c(0,0,0,0,NA),
+                            alpha.farm = c(rep(0,Nfarm)),taufarm = 1,
+                            tauLmic = 1,
+                            Lmic = c(upper-0.1))
+                            ),
+
+                  parameters = c("alpha0", "alpha.visit","resid","sigmaLmic","sigmafarm",
+                                  "pred.type0.visit1","pred.type0.visit2","pred.type0.visit3","pred.type0.visit4","pred.type0.visit5",
+                                 "pred.type1.visit1","pred.type1.visit2","pred.type1.visit3","pred.type1.visit4","pred.type1.visit5"),
+                  bugs.input = list(N=sample.size, lower=lower, upper=upper, visit=visit,farm=farm)
+                  ),
+
+
+    M7 = list(model.file = "model7.txt",         
+                model.name="M7: [Y]=Visit                              ",          
+                model.farm=0,
+                inits = list(
+                            list(
+                            alpha0 = 0,
+                            alpha.visit = 0,
+                            tauLmic = 1,
+                            Lmic = c(lower+0.1)
+                                 ),
+
+                            list(
+                            alpha0 = 0,
+                            alpha.visit =0,
+                            tauLmic = 1,
+                            Lmic = c(upper-0.1))
+                            ),
+
+                  parameters = c("alpha0", "alpha.visit","resid","sigmaLmic",
+                                 "pred.type0.visit1","pred.type0.visit2","pred.type0.visit3","pred.type0.visit4","pred.type0.visit5",
+                                 "pred.type1.visit1","pred.type1.visit2","pred.type1.visit3","pred.type1.visit4","pred.type1.visit5"),
+                  bugs.input = list(N=sample.size, lower=lower, upper=upper, visit=visit) 
+                ),
+
+     MF7 = list(model.file = "modelf7.txt",         
+                model.name="MF7: [Y]=Visit Farm(R)                      ",          
+                model.farm=1,
+                inits = list(
+                            list(
+                            alpha0 = 0,
+                            alpha.visit = 0,
+                            alpha.farm = c(rep(0,Nfarm)),taufarm = 1,
+                            tauLmic = 1,
+                            Lmic = c(lower+0.1)
+                                 ),
+
+                            list(
+                            alpha0 = 0,
+                            alpha.visit =0,
+                            alpha.farm = c(rep(0,Nfarm)),taufarm = 1,
+                            tauLmic = 1,
+                            Lmic = c(upper-0.1))
+                            ),
+
+                  parameters = c("alpha0", "alpha.visit","resid","sigmaLmic","sigmafarm",
+                                 "pred.type0.visit1","pred.type0.visit2","pred.type0.visit3","pred.type0.visit4","pred.type0.visit5",
+                                 "pred.type1.visit1","pred.type1.visit2","pred.type1.visit3","pred.type1.visit4","pred.type1.visit5"),
+                  bugs.input = list(N=sample.size, lower=lower, upper=upper, visit=visit,farm=farm) 
+                )
+
+                );
+
+
+
+
+
+
+
+
+for (j in valid.model)# Second for loop start here.
+   {model.number=j;
+   model=models[[model.number]];
+   num.chains <- 2;
+
+
+#Call WinBUGS and run iteration
+result<-bugs(data = model$bugs.input,  inits=model$inits, parameters.to.save=model$parameters, model.file = model$model.file,
+    n.chains = num.chains, n.iter = 10000,  n.burnin = 5000,
+    debug = FALSE, DIC = TRUE, digits = 5, codaPkg = FALSE,
+    bugs.directory = "d:/Program Files/WinBUGS14");
+
+
+#Generate a dir to same the coda files, codaindex file, pdf file, and the summary of bugs output.
+dir.name = paste(response.variable, model.number, sep="-");
+if (!file.exists(dir.name)) {dir.create(dir.name,showWarning=FALSE)};
+
+# Now to generate the simulated data based on each iteration of the MCMC chain.
+# And join the results from the two chains
+# First retreive the individual chain values from the coda files.
+results1 <- read.coda("coda1.txt", "codaindex.txt", quiet=T)
+results2 <- read.coda("coda2.txt", "codaindex.txt", quiet=T)
+results <- rbind(results1, results2)
+
+
+
+conc <-  c(LARGE.NUMBER, avian.plate.values[[response.variable]]$conc, SMALL.NUMBER)  # extract the cut points
+# cat("Censoring values are ", conc, "\n") # check that retreived the right values
+
+# Note that type, visit, and farm were generated by former code
+temp.farm<-model$model.farm;
+if (temp.farm==0) 
+{   my.deviance <- generate.sim.deviance(results, type, visit, conc)
+}else {my.deviance <- generate.sim.farm.deviance(results, type, visit, farm, conc)
+}
+
+# now to create bayesian p-value plot and compute bayesian p-value
+model.deviance <- results[,"deviance"]
+p.value <- sum(my.deviance > model.deviance, na.rm=TRUE) / 
+           (length(my.deviance)-sum(is.na(my.deviance < model.deviance)))
+min <- min(min(my.deviance),min(model.deviance))
+max <- max(max(my.deviance),max(model.deviance))
+
+
+
+pdf("Bayesian-p-value-plot.pdf")
+plot(my.deviance, model.deviance,xlim = c(min,max),ylim=c(min,max))
+abline(0,1)   # the reference line for my.deviance = observed.deviance
+name<-paste("Antimicrobial", response.variable, "and Model \n", model$model.name,  sep=" ");
+title(name)
+my.text <- paste("Bayesian p-value:", round(p.value,2), 
+           "\nAvg Model Deviance:", round(mean(model.deviance,2)),
+           "\nAvg Sim     Deviance:", round(mean(my.deviance,2))) 
+text(min(my.deviance,na.rm=TRUE)+.5*(max(my.deviance,na.rm=TRUE)-min(my.deviance,na.rm=TRUE)),
+     min(my.deviance,na.rm=TRUE)+.1*(max(my.deviance,na.rm=TRUE)-min(my.deviance,na.rm=TRUE)),
+     my.text, adj=0)
+dev.off()
+file.copy("Bayesian-p-value-plot.pdf", dir.name,overwrite=TRUE);
+
+
+results.col.names <- colnames(results)
+resid.col.index   <- grep("resid", results.col.names)
+resid <- results[,resid.col.index]
+sigmaLmic <- results[,"sigmaLmic"]  # get the residual variance
+std.resid <- diag(1/sigmaLmic) %*% resid  # standardize the residuals to be N(0,1)
+mean.std.resid <- apply(std.resid, 2, mean)  # find the posterior mean residual
+
+# create jittered visit values to display data
+ new.visit <- visit + (type-1.5)*.25 + rnorm(length(visit))*.1
+
+# Residual plot
+pdf("std-resid.pdf")
+plot(new.visit, mean.std.resid, pch=type,cex=0.7, ylab="Mean standardized
+residual", xlab="Visit (jittered)")
+abline(h=0)
+name1<-paste("Antimicrobial", response.variable, "and Model \n", model$model.name,"\n Circle=NonVeg; Triangle=Veg diet" , sep=" ");
+title(name1)
+dev.off()
+file.copy("std-resid.pdf", dir.name,overwrite=TRUE);
+
+
+# create a qq-plot against a normal distribution
+pdf("resid-qq-plot.pdf")
+qqnorm(mean.std.resid, main=" ")
+qqline(mean.std.resid)
+name2<-paste("Antimicrobial", response.variable, "and Model \n", model$model.name, sep=" ");
+title(name2)
+dev.off()
+file.copy("resid-qq-plot.pdf", dir.name,overwrite=TRUE);
+
+
+
+BGR<-max(result$summary[,8]);
+DIC<-result$DIC;
+pD<-result$pD;
+model<-model$model.name;
+my.out<-data.frame(model,DIC,pD,BGR)
+out<-rbind(out,my.out);
+
+
+
+#Save the coda files, codaindex file, and the summary of bugs output in the specifical dir.
+
+for (j in 1:num.chains) {
+file.copy(paste("coda", j, ".txt", sep=""), dir.name,overwrite=TRUE);
+#file.rename(paste("coda", j, ".txt", sep=""),paste(dir.name,"-","coda", j, ".txt", sep=""));
+
+}
+file.copy("codaIndex.txt", dir.name,overwrite=TRUE);
+#file.rename("codaIndex.txt",paste(dir.name,"-","codaIndex.txt",sep=""));
+
+
+#The summary result of the bugs output will be saved as out.txt in the directory
+#named as response.variable+model name. For example, CEFTIF-M1
+sink("output.txt")
+print(c(response.variable, model.number))
+print(result,digits.summary = 2)
+sink()
+file.copy("output.txt", dir.name,overwrite=TRUE);
+#file.rename("out.txt",paste(dir.name,"-","output.txt",sep=""));
+return;
+
+
+
+
+
+
+}
+
+#The summary of DIC, pD, BGR will be outputed to a file name as response.variable
+#For example, CEFTIF.txt
+a<-list();
+min.dic<-min(out$DIC);
+out$Delta.dic<-out$DIC-min.dic;
+out.name<-paste(response.variable,"-","DICsummary",".txt",sep="")
+t<-out[order(out$DIC,decreasing=FALSE),];
+a$model<-t$model;
+a$DIC<-t$DIC;
+a$pD<-t$pD;
+a$Max.BGR<-t$BGR;
+a$Delta.dic<-t$Delta.dic;
+a<-as.data.frame(a);
+sink(out.name);
+print(a,digits.summary=2);
+sink();
+return;
+}
+
+#The two for loops end up here.
+

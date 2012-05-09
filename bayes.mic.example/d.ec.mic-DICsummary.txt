@@ -1,0 +1,2 @@
+                                        model     DIC    pD  Max.BGR Delta.dic
+1 M9: [Y]=Visit                               1622.03 2.325 5.655692         0
